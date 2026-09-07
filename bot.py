@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from datetime import datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
@@ -22,13 +24,14 @@ log = logging.getLogger("train-alert")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-FROM, TO, DATE, CLASS, TRAIN = range(5)
+FROM, TO, DATE, CLASS, TRAIN, SEAT_COUNT, ADJACENT = range(7)
 CLASSES = {"S_CHAIR", "SHOVAN", "SHULOV", "AC_S", "AC_B", "SNIGDHA", "F_SEAT", "F_BERTH"}
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_ID = int(os.environ["ADMIN_TELEGRAM_ID"])
 DB_PATH = os.getenv("DATABASE_PATH", "data/watches.db")
 INTERVAL = max(30, int(os.getenv("CHECK_INTERVAL_SECONDS", "60")))
+BD_TZ = ZoneInfo("Asia/Dhaka")
 
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 store = Store(DB_PATH)
@@ -50,6 +53,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🚆 Train Ticket Alert Bot\n\n"
         "/watch — নতুন টিকিট খোঁজা শুরু\n"
+        "/target — ১৮ সেপ্টেম্বরের preset target চালু\n"
         "/list — চলমান watch দেখুন\n"
         "/check — এখনই সবগুলো পরীক্ষা\n"
         "/delete ID — watch মুছুন\n"
@@ -110,12 +114,41 @@ async def get_train(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     train_filter = update.message.text.strip()
     if train_filter.upper() == "ALL":
         train_filter = ""
-    watch_id = await store.add(train_filter=train_filter, **data)
+    data["train_filter"] = train_filter
+    await update.message.reply_text("কয়টি seat লাগবে? ১ থেকে ৪ লিখুন।")
+    return SEAT_COUNT
+
+
+@private
+async def get_seat_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = update.message.text.strip()
+    if not value.isdigit() or not 1 <= int(value) <= 4:
+        await update.message.reply_text("এক booking-এ ১ থেকে ৪টি seat দেওয়া যাবে। আবার লিখুন।")
+        return SEAT_COUNT
+    context.user_data["watch"]["seat_count"] = int(value)
+    await update.message.reply_text("সব seat পাশাপাশি লাগবে? YES অথবা NO লিখুন।")
+    return ADJACENT
+
+
+@private
+async def get_adjacent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = update.message.text.strip().upper()
+    if value not in {"YES", "NO"}:
+        await update.message.reply_text("YES অথবা NO লিখুন।")
+        return ADJACENT
+    data = context.user_data["watch"]
+    data["adjacent_required"] = value == "YES"
+    data["check_start"] = "07:00"
+    data["check_end"] = "09:00"
+    watch_id = await store.add(**data)
     await update.message.reply_text(
         f"✅ Watch #{watch_id} চালু হয়েছে\n"
         f"{data['from_city']} → {data['to_city']}\n"
         f"📅 {data['journey_date']} | 💺 {data['seat_class']}\n"
-        f"🚆 {train_filter or 'সব ট্রেন'}\n\nপ্রতি {INTERVAL} সেকেন্ডে পরীক্ষা হবে।"
+        f"🚆 {data['train_filter'] or 'সব ট্রেন'}\n"
+        f"👥 {data['seat_count']}টি {'পাশাপাশি ' if data['adjacent_required'] else ''}seat\n"
+        f"⏰ প্রতিদিন 07:00–09:00 (Bangladesh time)\n\n"
+        f"প্রতি {INTERVAL} সেকেন্ডে পরীক্ষা হবে।"
     )
     context.user_data.pop("watch", None)
     return ConversationHandler.END
@@ -136,7 +169,11 @@ async def list_watches(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     lines = ["🔎 চলমান Watch:"]
     for w in watches:
-        lines.append(f"#{w.id} — {w.from_city} → {w.to_city} | {w.journey_date} | {w.seat_class} | {w.train_filter or 'সব ট্রেন'}")
+        lines.append(
+            f"#{w.id} — {w.from_city} → {w.to_city} | {w.journey_date} | "
+            f"{w.seat_class} | {w.train_filter or 'সব ট্রেন'} | {w.seat_count}টি"
+            f"{' পাশাপাশি' if w.adjacent_required else ''} | {w.check_start}–{w.check_end}"
+        )
     await update.message.reply_text("\n".join(lines))
 
 
@@ -149,12 +186,49 @@ async def delete_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text("✅ মুছে দেওয়া হয়েছে।" if deleted else "এই ID পাওয়া যায়নি।")
 
 
+@private
+async def target_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    target = {
+        "from_city": "Dhaka",
+        "to_city": "Cox's Bazar",
+        "journey_date": "2026-09-18",
+        "seat_class": "S_CHAIR",
+        "train_filter": "Cox",
+        "seat_count": 4,
+        "adjacent_required": True,
+        "check_start": "07:00",
+        "check_end": "09:00",
+    }
+    for watch in await store.list():
+        if (
+            watch.from_city == target["from_city"]
+            and watch.to_city == target["to_city"]
+            and watch.journey_date == target["journey_date"]
+            and watch.seat_class == target["seat_class"]
+            and watch.seat_count == target["seat_count"]
+        ):
+            await update.message.reply_text(f"✅ Target আগেই চালু আছে: Watch #{watch.id}")
+            return
+    watch_id = await store.add(**target)
+    await update.message.reply_text(
+        f"✅ Target Watch #{watch_id} চালু\n"
+        "Dhaka → Cox's Bazar | 2026-09-18\n"
+        "Cox's Bazar Express | S_CHAIR | ৪টি পাশাপাশি\n"
+        "প্রতিদিন 07:00–09:00 (Bangladesh time)"
+    )
+
+
 def state_hash(results) -> str:
     visible = sorted((r.trip_number, r.seat_class, r.seats) for r in results if r.seats > 0)
     return hashlib.sha256(repr(visible).encode()).hexdigest() if visible else "EMPTY"
 
 
 async def inspect_watch(app: Application, watch: Watch, notify_empty: bool = False) -> None:
+    now = datetime.now(BD_TZ).time()
+    start = time.fromisoformat(watch.check_start)
+    end = time.fromisoformat(watch.check_end)
+    if not (start <= now <= end) and not notify_empty:
+        return
     try:
         results = await rail.search(watch.from_city, watch.to_city, watch.journey_date, watch.seat_class, watch.train_filter)
     except (RailAPIError, httpx.HTTPError) as exc:
@@ -162,7 +236,7 @@ async def inspect_watch(app: Application, watch: Watch, notify_empty: bool = Fal
         if notify_empty:
             await app.bot.send_message(ADMIN_ID, f"⚠️ Watch #{watch.id} পরীক্ষা করা যায়নি: {exc}")
         return
-    available = [item for item in results if item.seats > 0]
+    available = [item for item in results if item.seats >= watch.seat_count]
     new_state = state_hash(results)
     should_alert = bool(available) and new_state != watch.last_state
     await store.set_state(watch.id, new_state)
@@ -174,15 +248,20 @@ async def inspect_watch(app: Application, watch: Watch, notify_empty: bool = Fal
                 f"🛤 {watch.from_city} → {watch.to_city}\n"
                 f"📅 {watch.journey_date}\n"
                 f"💺 {item.seat_class}: {item.seats}টি\n"
+                f"🎯 প্রয়োজন: {watch.seat_count}টি{' পাশাপাশি' if watch.adjacent_required else ''}\n"
                 f"💳 ভাড়া: ৳{item.fare}\n"
                 f"🕐 ছাড়বে: {item.departure}\n\n"
+                "⚠️ মোট seat যথেষ্ট; পাশাপাশি আছে কি না seat-map খুলে নিশ্চিত করতে হবে।\n"
                 "দ্রুত অফিসিয়াল পেজে গিয়ে বুক করুন।"
             )
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🎟 Book Now", url=item.booking_url)]])
             await app.bot.send_message(ADMIN_ID, text, reply_markup=keyboard)
     elif notify_empty:
-        total = sum(item.seats for item in available)
-        await app.bot.send_message(ADMIN_ID, f"Watch #{watch.id}: এখন {total}টি matching seat পাওয়া গেছে।")
+        total = max((item.seats for item in results), default=0)
+        await app.bot.send_message(
+            ADMIN_ID,
+            f"Watch #{watch.id}: সর্বোচ্চ {total}টি matching seat; প্রয়োজন {watch.seat_count}টি।",
+        )
 
 
 async def check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -205,7 +284,8 @@ async def post_init(app: Application) -> None:
     await store.init()
     await app.bot.set_my_commands([
         ("watch", "নতুন টিকিট watch"), ("list", "চলমান watch"),
-        ("check", "এখনই পরীক্ষা"), ("delete", "watch মুছুন"), ("cancel", "বাতিল"),
+        ("target", "১৮ সেপ্টেম্বরের target চালু"), ("check", "এখনই পরীক্ষা"),
+        ("delete", "watch মুছুন"), ("cancel", "বাতিল"),
     ])
     app.job_queue.run_repeating(check_job, interval=INTERVAL, first=10, name="ticket-checker")
 
@@ -224,12 +304,15 @@ def main() -> None:
             DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
             CLASS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class)],
             TRAIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_train)],
+            SEAT_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_seat_count)],
+            ADJACENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_adjacent)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conversation)
     app.add_handler(CommandHandler("list", list_watches))
+    app.add_handler(CommandHandler("target", target_watch))
     app.add_handler(CommandHandler("delete", delete_watch))
     app.add_handler(CommandHandler("check", check_now))
     app.add_handler(CommandHandler("cancel", cancel))
