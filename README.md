@@ -6,6 +6,7 @@
 
 - `/watch` — ধাপে ধাপে নতুন watch তৈরি
 - `/target` — Dhaka → Cox's Bazar, ১৮ সেপ্টেম্বর, S_CHAIR, ৪টি পাশাপাশি seat-এর preset চালু
+- `/login` — password-protected Railway cloud browser link দেয়; message ৫ মিনিট পরে মুছে যায়
 - `/list` — active watch তালিকা
 - `/check` — এখনই পরীক্ষা
 - `/delete ID` — watch মুছে দেওয়া
