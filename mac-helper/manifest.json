@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Rail Sheba Seat Helper","version":"0.1.0","permissions":["storage","notifications"],"host_permissions":["https://eticket.railway.gov.bd/*"],"action":{"default_popup":"popup.html"},"content_scripts":[{"matches":["https://eticket.railway.gov.bd/*"],"js":["content.js"],"run_at":"document_idle"}]}
