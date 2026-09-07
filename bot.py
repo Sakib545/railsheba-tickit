@@ -32,6 +32,9 @@ ADMIN_ID = int(os.environ["ADMIN_TELEGRAM_ID"])
 DB_PATH = os.getenv("DATABASE_PATH", "data/watches.db")
 INTERVAL = max(30, int(os.getenv("CHECK_INTERVAL_SECONDS", "60")))
 BD_TZ = ZoneInfo("Asia/Dhaka")
+CHROMIUM_UI_URL = os.getenv("CHROMIUM_UI_URL", "")
+CHROMIUM_WEB_USERNAME = os.getenv("CHROMIUM_WEB_USERNAME", "")
+CHROMIUM_WEB_PASSWORD = os.getenv("CHROMIUM_WEB_PASSWORD", "")
 
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 store = Store(DB_PATH)
@@ -54,6 +57,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🚆 Train Ticket Alert Bot\n\n"
         "/watch — নতুন টিকিট খোঁজা শুরু\n"
         "/target — ১৮ সেপ্টেম্বরের preset target চালু\n"
+        "/login — Railway cloud browser-এ login\n"
         "/list — চলমান watch দেখুন\n"
         "/check — এখনই সবগুলো পরীক্ষা\n"
         "/delete ID — watch মুছুন\n"
@@ -186,6 +190,39 @@ async def delete_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text("✅ মুছে দেওয়া হয়েছে।" if deleted else "এই ID পাওয়া যায়নি।")
 
 
+async def delete_sensitive_message(context: ContextTypes.DEFAULT_TYPE) -> None:
+    data = context.job.data
+    try:
+        await context.bot.delete_message(data["chat_id"], data["message_id"])
+    except Exception as exc:
+        log.warning("Could not delete temporary login message: %s", exc)
+
+
+@private
+async def browser_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not CHROMIUM_UI_URL or not CHROMIUM_WEB_USERNAME or not CHROMIUM_WEB_PASSWORD:
+        await update.message.reply_text("⚠️ Browser login service এখনো configure করা হয়নি।")
+        return
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔐 Railway Browser খুলুন", url=CHROMIUM_UI_URL)]]
+    )
+    sent = await update.message.reply_text(
+        "Railway cloud browser login\n\n"
+        f"Username: `{CHROMIUM_WEB_USERNAME}`\n"
+        f"Password: `{CHROMIUM_WEB_PASSWORD}`\n\n"
+        "Browser খুলে Cloudflare verify করুন, তারপর Rail Sheba-তে login করুন।\n"
+        "নিরাপত্তার জন্য এই message ৫ মিনিট পরে মুছে যাবে।",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+    )
+    context.job_queue.run_once(
+        delete_sensitive_message,
+        when=300,
+        data={"chat_id": sent.chat_id, "message_id": sent.message_id},
+        name=f"delete-login-{sent.message_id}",
+    )
+
+
 @private
 async def target_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target = {
@@ -284,7 +321,8 @@ async def post_init(app: Application) -> None:
     await store.init()
     await app.bot.set_my_commands([
         ("watch", "নতুন টিকিট watch"), ("list", "চলমান watch"),
-        ("target", "১৮ সেপ্টেম্বরের target চালু"), ("check", "এখনই পরীক্ষা"),
+        ("target", "১৮ সেপ্টেম্বরের target চালু"), ("login", "Railway browser login"),
+        ("check", "এখনই পরীক্ষা"),
         ("delete", "watch মুছুন"), ("cancel", "বাতিল"),
     ])
     app.job_queue.run_repeating(check_job, interval=INTERVAL, first=10, name="ticket-checker")
@@ -313,6 +351,7 @@ def main() -> None:
     app.add_handler(conversation)
     app.add_handler(CommandHandler("list", list_watches))
     app.add_handler(CommandHandler("target", target_watch))
+    app.add_handler(CommandHandler("login", browser_login))
     app.add_handler(CommandHandler("delete", delete_watch))
     app.add_handler(CommandHandler("check", check_now))
     app.add_handler(CommandHandler("cancel", cancel))
