@@ -5,6 +5,7 @@
 ## Bot commands
 
 - `/watch` — ধাপে ধাপে নতুন watch তৈরি
+- `/target` — Dhaka → Cox's Bazar, ১৮ সেপ্টেম্বর, S_CHAIR, ৪টি পাশাপাশি seat-এর preset চালু
 - `/list` — active watch তালিকা
 - `/check` — এখনই পরীক্ষা
 - `/delete ID` — watch মুছে দেওয়া
@@ -40,7 +41,8 @@ Windows activation: `.venv\\Scripts\\activate`
 ## গুরুত্বপূর্ণ
 
 - `CHECK_INTERVAL_SECONDS` ৩০-এর নিচে দিলেও app ৩০ সেকেন্ড ব্যবহার করবে। প্রস্তাবিত ৬০ সেকেন্ড।
+- প্রতিটি watch-এ প্রয়োজনীয় seat সংখ্যা (১–৪), পাশাপাশি-seat preference এবং Bangladesh time অনুযায়ী 07:00–09:00 check window সংরক্ষিত হয়।
+- Availability API মোট seat জানায়, seat-map-এর পাশাপাশি arrangement জানায় না। তাই বর্তমান version পাশাপাশি seat reserve করে না; alert-এ এটি স্পষ্টভাবে দেখায়।
 - Railway/Shohoz API বদলালে adapter আপডেট লাগতে পারে।
 - Login credentials শুধু deployment secret variables-এ রাখুন।
 - Official booking page-এই OTP/CAPTCHA/payment সম্পন্ন করুন।
-
