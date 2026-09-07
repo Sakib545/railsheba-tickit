@@ -17,6 +17,10 @@ from storage import Store, Watch
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("train-alert")
+# Telegram API URLs contain the bot token. Keep HTTP client logs disabled so
+# credentials can never be printed by Railway's runtime log collector.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 FROM, TO, DATE, CLASS, TRAIN = range(5)
 CLASSES = {"S_CHAIR", "SHOVAN", "SHULOV", "AC_S", "AC_B", "SNIGDHA", "F_SEAT", "F_BERTH"}
@@ -234,4 +238,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
